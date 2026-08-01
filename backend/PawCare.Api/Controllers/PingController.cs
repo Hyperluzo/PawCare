@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using PawCare.Api.Data;
 
@@ -24,5 +25,9 @@ namespace PawCare.Api.Controllers
             bool canConnect = await _db.Database.CanConnectAsync();
             return Ok(new { databaseConnected = canConnect });
         }
+
+        [HttpGet("secure")]
+        [Authorize]
+        public IActionResult GetSecure() => Ok(new { message = "You're authenticated!" });
     }
 }
