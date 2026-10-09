@@ -140,19 +140,53 @@ namespace PawCare.Api.Controllers
         [HttpGet("{id}/patients")]
         public async Task<IActionResult> GetWardPatients(int id)
         {
-            var wardExists = await _db.Wards.AnyAsync(w => w.Id == id);
-            if (!wardExists)
+            var ward = await _db.Wards.FindAsync(id);
+            if (ward is null)
             {
                 return NotFound(new { message = "Ward not found" });
             }
 
+            var wardPatientCount = await _db.Patients
+                .CountAsync(p => p.WardId == id && p.AdmissionStatus == "ADMITTED");
+
             var patients = await _db.Patients
                 .Where(p => p.WardId == id && p.AdmissionStatus == "ADMITTED")
                 .Include(p => p.Owner)
-                .Include(p => p.Ward)
+                .OrderByDescending(p => p.AdmittedAt)
                 .ToListAsync();
 
-            return Ok(patients);
+            var dtos = patients.Select(p => new PatientDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                Species = p.Species,
+                Breed = p.Breed,
+                Age = p.Age,
+                Gender = p.Gender,
+                Owner = new OwnerDto
+                {
+                    Id = p.Owner.Id,
+                    Name = p.Owner.Name,
+                    Email = p.Owner.Email,
+                    Phone = p.Owner.Phone
+                },
+                Ward = new WardDto
+                {
+                    Id = ward.Id,
+                    Name = ward.Name,
+                    Description = ward.Description,
+                    Capacity = ward.Capacity,
+                    PatientCount = wardPatientCount
+                },
+                AdmissionStatus = p.AdmissionStatus,
+                ClinicalStatus = p.ClinicalStatus,
+                AdmittedAt = p.AdmittedAt,
+                DischargedAt = p.DischargedAt,
+                Treatments = new List<TreatmentDto>(),
+                StatusHistory = new List<StatusHistoryDto>()
+            }).ToList();
+
+            return Ok(dtos);
         }
     }
 }
