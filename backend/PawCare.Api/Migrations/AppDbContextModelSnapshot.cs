@@ -146,7 +146,13 @@ namespace PawCare.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AdmissionStatus");
+
+                    b.HasIndex("ClinicalStatus");
+
                     b.HasIndex("OwnerId");
+
+                    b.HasIndex("Species");
 
                     b.HasIndex("WardId");
 

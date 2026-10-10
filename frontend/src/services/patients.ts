@@ -8,9 +8,17 @@ import type {
 } from "../types/api";
 
 export interface PatientSearchParams {
+  search?: string;
   name?: string;
   species?: string;
+  breed?: string;
+  owner?: string;
   status?: string;
+  clinicalStatus?: string;
+  admissionStatus?: string;
+  wardId?: number;
+  sortBy?: string;
+  sortOrder?: string;
   page?: number;
   pageSize?: number;
 }

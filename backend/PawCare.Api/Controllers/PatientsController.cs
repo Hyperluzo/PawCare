@@ -24,7 +24,14 @@ namespace PawCare.Api.Controllers
             [FromQuery] string? name = null,
             [FromQuery] string? species = null,
             [FromQuery] string? breed = null,
+            [FromQuery] string? owner = null,
             [FromQuery] string? status = null,
+            [FromQuery] string? clinicalStatus = null,
+            [FromQuery] string? admissionStatus = null,
+            [FromQuery] int? wardId = null,
+            [FromQuery] string? search = null,
+            [FromQuery] string? sortBy = "createdAt",
+            [FromQuery] string? sortOrder = "desc",
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20)
         {
@@ -32,6 +39,18 @@ namespace PawCare.Api.Controllers
                 .Include(p => p.Owner)
                 .Include(p => p.Ward)
                 .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim();
+                query = query.Where(p =>
+                    EF.Functions.ILike(p.Name, $"%{term}%") ||
+                    EF.Functions.ILike(p.Species, $"%{term}%") ||
+                    EF.Functions.ILike(p.Breed, $"%{term}%") ||
+                    EF.Functions.ILike(p.Owner.Name, $"%{term}%") ||
+                    EF.Functions.ILike(p.Owner.Phone, $"%{term}%") ||
+                    EF.Functions.ILike(p.Ward.Name, $"%{term}%"));
+            }
 
             if (!string.IsNullOrWhiteSpace(name))
             {
@@ -51,10 +70,36 @@ namespace PawCare.Api.Controllers
                 query = query.Where(p => EF.Functions.ILike(p.Breed, $"%{trimmedBreed}%"));
             }
 
+            if (!string.IsNullOrWhiteSpace(owner))
+            {
+                var trimmedOwner = owner.Trim();
+                query = query.Where(p =>
+                    EF.Functions.ILike(p.Owner.Name, $"%{trimmedOwner}%") ||
+                    EF.Functions.ILike(p.Owner.Phone, $"%{trimmedOwner}%") ||
+                    EF.Functions.ILike(p.Owner.Email, $"%{trimmedOwner}%"));
+            }
+
             if (!string.IsNullOrWhiteSpace(status))
             {
                 var trimmedStatus = status.Trim();
                 query = query.Where(p => p.ClinicalStatus == trimmedStatus || p.AdmissionStatus == trimmedStatus);
+            }
+
+            if (!string.IsNullOrWhiteSpace(clinicalStatus))
+            {
+                var trimmedClinicalStatus = clinicalStatus.Trim();
+                query = query.Where(p => p.ClinicalStatus == trimmedClinicalStatus);
+            }
+
+            if (!string.IsNullOrWhiteSpace(admissionStatus))
+            {
+                var trimmedAdmissionStatus = admissionStatus.Trim();
+                query = query.Where(p => p.AdmissionStatus == trimmedAdmissionStatus);
+            }
+
+            if (wardId.HasValue && wardId.Value > 0)
+            {
+                query = query.Where(p => p.WardId == wardId.Value);
             }
 
             var total = await query.CountAsync();
@@ -62,8 +107,26 @@ namespace PawCare.Api.Controllers
             var safePage = Math.Max(1, page);
             var safePageSize = Math.Clamp(pageSize, 1, 100);
 
+            var sort = (sortBy ?? "createdAt").Trim().ToLowerInvariant();
+            var order = (sortOrder ?? "desc").Trim().ToLowerInvariant();
+
+            query = (sort, order) switch
+            {
+                ("name", "asc") => query.OrderBy(p => p.Name),
+                ("name", "desc") => query.OrderByDescending(p => p.Name),
+                ("species", "asc") => query.OrderBy(p => p.Species).ThenBy(p => p.Breed),
+                ("species", "desc") => query.OrderByDescending(p => p.Species).ThenBy(p => p.Breed),
+                ("admittedat", "asc") => query.OrderBy(p => p.AdmittedAt),
+                ("admittedat", "desc") => query.OrderByDescending(p => p.AdmittedAt),
+                ("clinicalstatus", "asc") => query.OrderBy(p => p.ClinicalStatus),
+                ("clinicalstatus", "desc") => query.OrderByDescending(p => p.ClinicalStatus),
+                ("admissionstatus", "asc") => query.OrderBy(p => p.AdmissionStatus),
+                ("admissionstatus", "desc") => query.OrderByDescending(p => p.AdmissionStatus),
+                ("createdat", "asc") => query.OrderBy(p => p.CreatedAt),
+                _ => query.OrderByDescending(p => p.CreatedAt)
+            };
+
             var patients = await query
-                .OrderByDescending(p => p.CreatedAt)
                 .Skip((safePage - 1) * safePageSize)
                 .Take(safePageSize)
                 .ToListAsync();

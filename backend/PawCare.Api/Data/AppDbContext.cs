@@ -14,5 +14,17 @@ namespace PawCare.Api.Data
         public DbSet<Treatment> Treatments => Set<Treatment>();
         public DbSet<StatusHistory> StatusHistories => Set<StatusHistory>();
         public DbSet<Notification> Notifications => Set<Notification>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<Patient>(entity =>
+            {
+                entity.HasIndex(p => p.Species);
+                entity.HasIndex(p => p.ClinicalStatus);
+                entity.HasIndex(p => p.AdmissionStatus);
+            });
+        }
     }
 }
