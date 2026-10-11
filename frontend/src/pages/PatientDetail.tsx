@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import { ArrowLeft, CheckCircle2, Clock, FileText, Pill, Plus, Stethoscope, User } from "lucide-react";
 import { patientsApi } from "../services/patients";
 import type { ClinicalStatus, Patient } from "../types/api";
 import { AdmissionStatusBadge, ClinicalStatusBadge } from "../components/StatusBadge";
@@ -15,6 +16,7 @@ export default function PatientDetail() {
 
   const [treatment, setTreatment] = useState({ diagnosis: "", treatment: "", medication: "", notes: "" });
   const [savingTreatment, setSavingTreatment] = useState(false);
+  const [treatmentSuccess, setTreatmentSuccess] = useState<string | null>(null);
 
   const [newStatus, setNewStatus] = useState<ClinicalStatus>("UNDER_TREATMENT");
   const [markDischarged, setMarkDischarged] = useState(false);
@@ -33,13 +35,20 @@ export default function PatientDetail() {
 
   async function handleAddTreatment(e: FormEvent) {
     e.preventDefault();
+    if (!treatment.diagnosis.trim() || !treatment.treatment.trim()) {
+      setError("Please provide both diagnosis and treatment plan.");
+      return;
+    }
     setSavingTreatment(true);
+    setError(null);
+    setTreatmentSuccess(null);
     try {
       await patientsApi.addTreatment(patientId, treatment);
       setTreatment({ diagnosis: "", treatment: "", medication: "", notes: "" });
+      setTreatmentSuccess("Treatment recorded successfully and attributed to your staff account.");
       load();
-    } catch {
-      setError("Couldn't save treatment.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't save treatment record.");
     } finally {
       setSavingTreatment(false);
     }
@@ -53,6 +62,7 @@ export default function PatientDetail() {
     }
     setSavingStatus(true);
     setError(null);
+    setTreatmentSuccess(null);
     try {
       await patientsApi.changeStatus(patientId, {
         newClinicalStatus: newStatus,
@@ -73,37 +83,58 @@ export default function PatientDetail() {
   if (error && !patient) return <p className="text-sm text-red-500 bg-red-100 rounded-lg px-3 py-2">{error}</p>;
   if (!patient) return <p className="text-sm text-ink-muted">Loading…</p>;
 
-  const inputClass = "w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-teal-600";
+  const inputClass = "w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-teal-600 bg-surface";
   const labelClass = "block text-xs font-medium text-ink-muted mb-1";
 
   return (
-    <div>
-      <div className="flex items-start justify-between mb-1">
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-ink">{patient.name}</h1>
-          <p className="text-sm text-ink-muted">{patient.species} · {patient.breed} · {patient.age} yrs · {patient.gender}</p>
-        </div>
-        <div className="flex gap-2">
-          <AdmissionStatusBadge status={patient.admissionStatus} />
-          <ClinicalStatusBadge status={patient.clinicalStatus} />
+    <div className="space-y-6">
+      {/* Top Bar with back link and status badges */}
+      <div>
+        <Link
+          to="/patients"
+          className="inline-flex items-center gap-1.5 text-xs text-ink-muted hover:text-teal-700 transition-colors mb-2"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to Patients
+        </Link>
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+          <div>
+            <h1 className="font-display text-2xl font-semibold text-ink">{patient.name}</h1>
+            <p className="text-sm text-ink-muted">{patient.species} · {patient.breed} · {patient.age} yrs · {patient.gender}</p>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <AdmissionStatusBadge status={patient.admissionStatus} />
+            <ClinicalStatusBadge status={patient.clinicalStatus} />
+          </div>
         </div>
       </div>
 
-      {error && <p className="text-sm text-red-500 bg-red-100 rounded-lg px-3 py-2 mt-4">{error}</p>}
+      {error && (
+        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">
+          {error}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-6">
-        <div className="bg-surface border border-line rounded-2xl p-5">
+      {treatmentSuccess && (
+        <div className="text-sm text-teal-800 bg-teal-50 border border-teal-200 rounded-lg px-3.5 py-2.5 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
+          <span>{treatmentSuccess}</span>
+        </div>
+      )}
+
+      {/* Owner & Ward Info + Update Status */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="bg-surface border border-line rounded-2xl p-5 shadow-xs">
           <h2 className="font-display font-semibold text-ink text-sm mb-3">Owner & Ward</h2>
-          <dl className="text-sm space-y-1.5">
-            <div className="flex justify-between"><dt className="text-ink-muted">Owner</dt><dd className="text-ink">{patient.owner.name}</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-muted">Contact</dt><dd className="text-ink">{patient.owner.phone}</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-muted">Email</dt><dd className="text-ink">{patient.owner.email}</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-muted">Ward</dt><dd className="text-ink">{patient.ward?.name}</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-muted">Admitted</dt><dd className="text-ink">{new Date(patient.admittedAt).toLocaleDateString()}</dd></div>
+          <dl className="text-sm space-y-2">
+            <div className="flex justify-between border-b border-line/60 pb-1.5"><dt className="text-ink-muted">Owner</dt><dd className="text-ink font-medium">{patient.owner.name}</dd></div>
+            <div className="flex justify-between border-b border-line/60 pb-1.5"><dt className="text-ink-muted">Contact Phone</dt><dd className="text-ink">{patient.owner.phone}</dd></div>
+            <div className="flex justify-between border-b border-line/60 pb-1.5"><dt className="text-ink-muted">Email</dt><dd className="text-ink">{patient.owner.email}</dd></div>
+            <div className="flex justify-between border-b border-line/60 pb-1.5"><dt className="text-ink-muted">Ward</dt><dd className="text-ink font-medium">{patient.ward?.name ?? "Unassigned"}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Admitted Date</dt><dd className="text-ink">{new Date(patient.admittedAt).toLocaleDateString()}</dd></div>
           </dl>
         </div>
 
-        <div className="bg-surface border border-line rounded-2xl p-5">
+        <div className="bg-surface border border-line rounded-2xl p-5 shadow-xs">
           <h2 className="font-display font-semibold text-ink text-sm mb-3">Update status</h2>
           <form onSubmit={handleStatusChange} className="space-y-3">
             <div>
@@ -114,17 +145,17 @@ export default function PatientDetail() {
             </div>
 
             {patient.admissionStatus === "ADMITTED" && (
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm text-ink">
+              <div className="space-y-2 pt-1">
+                <label className="flex items-center gap-2 text-sm text-ink cursor-pointer">
                   <input type="checkbox" checked={markDischarged} onChange={(e) => { setMarkDischarged(e.target.checked); if (e.target.checked) setMarkDeceased(false); }} />
                   Mark as discharged
                 </label>
-                <label className="flex items-center gap-2 text-sm text-ink">
+                <label className="flex items-center gap-2 text-sm text-ink cursor-pointer">
                   <input type="checkbox" checked={markDeceased} onChange={(e) => { setMarkDeceased(e.target.checked); if (e.target.checked) setMarkDischarged(false); }} />
                   Mark as deceased
                 </label>
                 {markDeceased && (
-                  <label className="flex items-center gap-2 text-sm text-red-500 bg-red-100 rounded-lg px-3 py-2">
+                  <label className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5 cursor-pointer">
                     <input type="checkbox" checked={confirmDeceased} onChange={(e) => setConfirmDeceased(e.target.checked)} />
                     I confirm this patient should be marked deceased. The owner will be notified.
                   </label>
@@ -140,44 +171,125 @@ export default function PatientDetail() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
-        <div className="bg-surface border border-line rounded-2xl p-5">
-          <h2 className="font-display font-semibold text-ink text-sm mb-3">Add treatment</h2>
+      {/* Treatments: Add Treatment Form & Treatment History */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Add Treatment Form */}
+        <div className="bg-surface border border-line rounded-2xl p-5 shadow-xs">
+          <div className="flex items-center gap-2 mb-3">
+            <Stethoscope className="w-4 h-4 text-teal-700" />
+            <h2 className="font-display font-semibold text-ink text-sm">Add Treatment Record</h2>
+          </div>
           <form onSubmit={handleAddTreatment} className="space-y-3">
             <div>
-              <label className={labelClass}>Diagnosis</label>
-              <input required className={inputClass} value={treatment.diagnosis} onChange={(e) => setTreatment({ ...treatment, diagnosis: e.target.value })} />
+              <label className={labelClass}>Diagnosis *</label>
+              <input
+                required
+                className={inputClass}
+                placeholder="e.g. Canine Parvovirus, Corneal Ulcer"
+                value={treatment.diagnosis}
+                onChange={(e) => setTreatment({ ...treatment, diagnosis: e.target.value })}
+              />
             </div>
             <div>
-              <label className={labelClass}>Treatment</label>
-              <input required className={inputClass} value={treatment.treatment} onChange={(e) => setTreatment({ ...treatment, treatment: e.target.value })} />
+              <label className={labelClass}>Treatment Plan / Actions *</label>
+              <input
+                required
+                className={inputClass}
+                placeholder="e.g. IV Fluid Therapy, Wound debridement & dressing"
+                value={treatment.treatment}
+                onChange={(e) => setTreatment({ ...treatment, treatment: e.target.value })}
+              />
             </div>
             <div>
-              <label className={labelClass}>Medication</label>
-              <input className={inputClass} value={treatment.medication} onChange={(e) => setTreatment({ ...treatment, medication: e.target.value })} />
+              <label className={labelClass}>Medication / Dosage</label>
+              <input
+                className={inputClass}
+                placeholder="e.g. Cefazolin 22mg/kg IV q8h, Meloxicam 0.1mg/kg"
+                value={treatment.medication}
+                onChange={(e) => setTreatment({ ...treatment, medication: e.target.value })}
+              />
             </div>
             <div>
-              <label className={labelClass}>Notes</label>
-              <textarea className={inputClass} rows={2} value={treatment.notes} onChange={(e) => setTreatment({ ...treatment, notes: e.target.value })} />
+              <label className={labelClass}>Clinical Notes</label>
+              <textarea
+                className={inputClass}
+                rows={3}
+                placeholder="Observations, patient response, vital signs..."
+                value={treatment.notes}
+                onChange={(e) => setTreatment({ ...treatment, notes: e.target.value })}
+              />
             </div>
-            <button type="submit" disabled={savingTreatment}
-              className="rounded-lg bg-teal-700 text-white text-sm font-medium px-4 py-2 hover:bg-teal-800 transition-colors disabled:opacity-60">
-              {savingTreatment ? "Saving…" : "Add treatment"}
+            <button
+              type="submit"
+              disabled={savingTreatment}
+              className="inline-flex items-center gap-2 rounded-lg bg-teal-700 text-white text-sm font-medium px-4 py-2 hover:bg-teal-800 transition-colors disabled:opacity-60 shadow-xs"
+            >
+              {savingTreatment ? (
+                <span>Recording…</span>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  <span>Log Treatment</span>
+                </>
+              )}
             </button>
           </form>
         </div>
 
-        <div className="bg-surface border border-line rounded-2xl p-5">
-          <h2 className="font-display font-semibold text-ink text-sm mb-3">Treatment history</h2>
+        {/* Treatment History */}
+        <div className="bg-surface border border-line rounded-2xl p-5 shadow-xs flex flex-col">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-teal-700" />
+              <h2 className="font-display font-semibold text-ink text-sm">Treatment History</h2>
+            </div>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 font-medium">
+              {patient.treatments.length} {patient.treatments.length === 1 ? "record" : "records"}
+            </span>
+          </div>
+
           {patient.treatments.length === 0 ? (
-            <p className="text-sm text-ink-muted">No treatments logged yet.</p>
+            <div className="flex-1 flex flex-col items-center justify-center py-10 text-center">
+              <Stethoscope className="w-8 h-8 text-ink-muted/50 mb-2" />
+              <p className="text-sm font-medium text-ink">No treatments logged yet</p>
+              <p className="text-xs text-ink-muted max-w-xs mt-0.5">
+                Use the form on the left to record the first diagnosis, treatment, and medication for {patient.name}.
+              </p>
+            </div>
           ) : (
-            <ul className="space-y-3">
+            <ul className="space-y-3.5 max-h-[500px] overflow-y-auto pr-1 divide-y divide-line">
               {patient.treatments.map((t) => (
-                <li key={t.id} className="border-b border-line last:border-0 pb-3 last:pb-0">
-                  <div className="text-sm font-medium text-ink">{t.diagnosis}</div>
-                  <div className="text-sm text-ink-muted">{t.treatment}{t.medication ? ` · ${t.medication}` : ""}</div>
-                  <div className="text-xs text-ink-muted mt-1">{t.updatedByUserName} · {new Date(t.createdAt).toLocaleString()}</div>
+                <li key={t.id} className="pt-3.5 first:pt-0 space-y-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-sm font-semibold text-ink">{t.diagnosis}</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-ink-muted whitespace-nowrap shrink-0">
+                      <Clock className="w-3 h-3" />
+                      {new Date(t.createdAt).toLocaleDateString()} {new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+
+                  <div className="text-sm text-ink">
+                    <span className="text-ink-muted">Plan: </span>
+                    {t.treatment}
+                  </div>
+
+                  {t.medication && (
+                    <div className="inline-flex items-center gap-1.5 text-xs text-teal-800 bg-teal-50 px-2 py-0.5 rounded-md">
+                      <Pill className="w-3 h-3 text-teal-600 shrink-0" />
+                      <span>{t.medication}</span>
+                    </div>
+                  )}
+
+                  {t.notes && (
+                    <div className="text-xs text-ink-muted bg-bg/80 border border-line/60 rounded-lg p-2 italic">
+                      {t.notes}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-1.5 text-xs text-ink-muted pt-0.5">
+                    <User className="w-3.5 h-3.5 text-ink-muted" />
+                    <span>Logged by <strong className="font-medium text-ink">{t.updatedByUserName}</strong></span>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -187,3 +299,4 @@ export default function PatientDetail() {
     </div>
   );
 }
+

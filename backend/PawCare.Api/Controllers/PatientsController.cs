@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PawCare.Api.Data;
 using PawCare.Api.DTOs;
 using PawCare.Api.Models;
+using System.Security.Claims;
 
 namespace PawCare.Api.Controllers
 {
@@ -178,10 +179,10 @@ namespace PawCare.Api.Controllers
                 {
                     Id = t.Id,
                     PatientId = t.PatientId,
-                    Diagnosis = t.Description,
-                    Treatment = t.Description,
-                    Medication = "",
-                    Notes = null,
+                    Diagnosis = !string.IsNullOrEmpty(t.Diagnosis) ? t.Diagnosis : t.Description,
+                    Treatment = !string.IsNullOrEmpty(t.TreatmentPlan) ? t.TreatmentPlan : t.Description,
+                    Medication = t.Medication ?? string.Empty,
+                    Notes = t.Notes,
                     UpdatedByUserName = t.AddedByUser != null ? t.AddedByUser.Name : "Staff",
                     CreatedAt = t.CreatedAt
                 })
@@ -384,6 +385,96 @@ namespace PawCare.Api.Controllers
                 .CountAsync(p => p.WardId == patient.WardId && p.AdmissionStatus == "ADMITTED");
 
             return Ok(MapToDto(patient, patient.Owner, patient.Ward, wardOccupancy));
+        }
+
+        [HttpGet("{id}/treatments")]
+        public async Task<ActionResult<List<TreatmentDto>>> GetTreatments(int id)
+        {
+            var patientExists = await _db.Patients.AnyAsync(p => p.Id == id);
+            if (!patientExists)
+            {
+                return NotFound(new { message = "Patient not found" });
+            }
+
+            var treatments = await _db.Treatments
+                .Where(t => t.PatientId == id)
+                .Include(t => t.AddedByUser)
+                .OrderByDescending(t => t.CreatedAt)
+                .Select(t => new TreatmentDto
+                {
+                    Id = t.Id,
+                    PatientId = t.PatientId,
+                    Diagnosis = !string.IsNullOrEmpty(t.Diagnosis) ? t.Diagnosis : t.Description,
+                    Treatment = !string.IsNullOrEmpty(t.TreatmentPlan) ? t.TreatmentPlan : t.Description,
+                    Medication = t.Medication ?? string.Empty,
+                    Notes = t.Notes,
+                    UpdatedByUserName = t.AddedByUser != null ? t.AddedByUser.Name : "Staff",
+                    CreatedAt = t.CreatedAt
+                })
+                .ToListAsync();
+
+            return Ok(treatments);
+        }
+
+        [HttpPost("{id}/treatments")]
+        public async Task<ActionResult<TreatmentDto>> AddTreatment(int id, TreatmentRequest request)
+        {
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            {
+                return Unauthorized(new { message = "User identity not found in token" });
+            }
+
+            var user = await _db.Users.FindAsync(userId);
+            if (user is null || !user.IsActive)
+            {
+                return Unauthorized(new { message = "User account not found or inactive" });
+            }
+
+            var patient = await _db.Patients.FindAsync(id);
+            if (patient is null)
+            {
+                return NotFound(new { message = "Patient not found" });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Diagnosis))
+            {
+                return BadRequest(new { message = "Diagnosis is required" });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Treatment))
+            {
+                return BadRequest(new { message = "Treatment description is required" });
+            }
+
+            var treatment = new Treatment
+            {
+                PatientId = patient.Id,
+                Diagnosis = request.Diagnosis.Trim(),
+                TreatmentPlan = request.Treatment.Trim(),
+                Medication = request.Medication?.Trim() ?? string.Empty,
+                Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
+                Description = request.Treatment.Trim(),
+                AddedByUserId = userId,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _db.Treatments.Add(treatment);
+            await _db.SaveChangesAsync();
+
+            var dto = new TreatmentDto
+            {
+                Id = treatment.Id,
+                PatientId = treatment.PatientId,
+                Diagnosis = treatment.Diagnosis,
+                Treatment = treatment.TreatmentPlan,
+                Medication = treatment.Medication,
+                Notes = treatment.Notes,
+                UpdatedByUserName = user.Name,
+                CreatedAt = treatment.CreatedAt
+            };
+
+            return CreatedAtAction(nameof(GetById), new { id = patient.Id }, dto);
         }
 
         private static PatientDto MapToDto(

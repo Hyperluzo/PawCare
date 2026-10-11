@@ -211,8 +211,24 @@ namespace PawCare.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Diagnosis")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Medication")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
                     b.Property<int>("PatientId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("TreatmentPlan")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("Treatment");
 
                     b.HasKey("Id");
 

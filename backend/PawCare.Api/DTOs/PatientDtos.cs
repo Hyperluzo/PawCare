@@ -39,6 +39,18 @@ namespace PawCare.Api.DTOs
         public int? WardId { get; set; }
     }
 
+    public class TreatmentRequest
+    {
+        public string Diagnosis { get; set; } = default!;
+        public string Treatment { get; set; } = default!;
+        public string? Medication { get; set; }
+        public string? Notes { get; set; }
+    }
+
+    public class CreateTreatmentRequest : TreatmentRequest
+    {
+    }
+
     public class TreatmentDto
     {
         public int Id { get; set; }
