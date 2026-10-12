@@ -40,5 +40,7 @@ export const patientsApi = {
     data: { diagnosis: string; treatment: string; medication: string; notes?: string }
   ) => api.post<Treatment>(`/patients/${id}/treatments`, data),
   changeStatus: (id: number, data: StatusChangeRequest) =>
-    api.patch<void>(`/patients/${id}/status`, data),
+    api.patch<Patient>(`/patients/${id}/status`, data),
+  getStatusHistory: (id: number) =>
+    api.get<StatusHistoryEntry[]>(`/patients/${id}/status-history`),
 };

@@ -309,6 +309,20 @@ namespace PawCare.Api.Controllers
             _db.Patients.Add(patient);
             await _db.SaveChangesAsync();
 
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out var staffUserId))
+            {
+                _db.StatusHistories.Add(new StatusHistory
+                {
+                    PatientId = patient.Id,
+                    OldStatus = "NONE",
+                    NewStatus = AdmissionStatuses.Admitted,
+                    ChangedByUserId = staffUserId,
+                    ChangedAt = DateTime.UtcNow
+                });
+                await _db.SaveChangesAsync();
+            }
+
             var dto = MapToDto(patient, owner, ward, currentOccupancy + 1);
 
             return CreatedAtAction(nameof(GetById), new { id = patient.Id }, dto);
@@ -475,6 +489,186 @@ namespace PawCare.Api.Controllers
             };
 
             return CreatedAtAction(nameof(GetById), new { id = patient.Id }, dto);
+        }
+
+        [HttpPatch("{id}/status")]
+        public async Task<ActionResult<PatientDto>> ChangeStatus(int id, StatusChangeRequest request)
+        {
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            {
+                return Unauthorized(new { message = "User identity not found in token" });
+            }
+
+            var user = await _db.Users.FindAsync(userId);
+            if (user is null || !user.IsActive)
+            {
+                return Unauthorized(new { message = "User account not found or inactive" });
+            }
+
+            var patient = await _db.Patients
+                .Include(p => p.Owner)
+                .Include(p => p.Ward)
+                .FirstOrDefaultAsync(p => p.Id == id);
+
+            if (patient is null)
+            {
+                return NotFound(new { message = "Patient not found" });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.NewClinicalStatus) && string.IsNullOrWhiteSpace(request.NewAdmissionStatus))
+            {
+                return BadRequest(new { message = "At least one of NewClinicalStatus or NewAdmissionStatus must be provided." });
+            }
+
+            string? normalizedClinical = null;
+            if (!string.IsNullOrWhiteSpace(request.NewClinicalStatus))
+            {
+                normalizedClinical = ClinicalStatuses.Normalize(request.NewClinicalStatus);
+                if (normalizedClinical is null)
+                {
+                    return BadRequest(new { message = $"Invalid clinical status '{request.NewClinicalStatus}'. Allowed values are: {string.Join(", ", ClinicalStatuses.All)}" });
+                }
+            }
+
+            string? normalizedAdmission = null;
+            if (!string.IsNullOrWhiteSpace(request.NewAdmissionStatus))
+            {
+                normalizedAdmission = AdmissionStatuses.Normalize(request.NewAdmissionStatus);
+                if (normalizedAdmission is null)
+                {
+                    return BadRequest(new { message = $"Invalid admission status '{request.NewAdmissionStatus}'. Allowed values are: {string.Join(", ", AdmissionStatuses.All)}" });
+                }
+
+                if (normalizedAdmission == AdmissionStatuses.Deceased && !request.Confirm)
+                {
+                    return BadRequest(new { message = "DECEASED requires explicit confirmation." });
+                }
+            }
+
+            var oldClinicalStatus = patient.ClinicalStatus;
+            var oldAdmissionStatus = patient.AdmissionStatus;
+            var now = DateTime.UtcNow;
+            var historyEntries = new List<StatusHistory>();
+
+            if (normalizedClinical != null)
+            {
+                patient.ClinicalStatus = normalizedClinical;
+                if (!normalizedClinical.Equals(oldClinicalStatus, StringComparison.OrdinalIgnoreCase))
+                {
+                    historyEntries.Add(new StatusHistory
+                    {
+                        PatientId = patient.Id,
+                        OldStatus = oldClinicalStatus,
+                        NewStatus = normalizedClinical,
+                        ChangedByUserId = userId,
+                        ChangedAt = now
+                    });
+                }
+            }
+
+            if (normalizedAdmission != null)
+            {
+                patient.AdmissionStatus = normalizedAdmission;
+                if (normalizedAdmission == AdmissionStatuses.Discharged || normalizedAdmission == AdmissionStatuses.Deceased)
+                {
+                    patient.DischargedAt = now;
+                }
+                else if (normalizedAdmission == AdmissionStatuses.Admitted)
+                {
+                    patient.DischargedAt = null;
+                }
+
+                if (!normalizedAdmission.Equals(oldAdmissionStatus, StringComparison.OrdinalIgnoreCase))
+                {
+                    historyEntries.Add(new StatusHistory
+                    {
+                        PatientId = patient.Id,
+                        OldStatus = oldAdmissionStatus,
+                        NewStatus = normalizedAdmission,
+                        ChangedByUserId = userId,
+                        ChangedAt = now
+                    });
+                }
+            }
+
+            // If neither value differed from previous state but user explicitly requested status update
+            if (historyEntries.Count == 0)
+            {
+                historyEntries.Add(new StatusHistory
+                {
+                    PatientId = patient.Id,
+                    OldStatus = oldClinicalStatus,
+                    NewStatus = normalizedClinical ?? oldClinicalStatus,
+                    ChangedByUserId = userId,
+                    ChangedAt = now
+                });
+            }
+
+            _db.StatusHistories.AddRange(historyEntries);
+            await _db.SaveChangesAsync();
+
+            var wardOccupancy = await _db.Patients
+                .CountAsync(p => p.WardId == patient.WardId && p.AdmissionStatus == AdmissionStatuses.Admitted);
+
+            var treatments = await _db.Treatments
+                .Where(t => t.PatientId == id)
+                .Include(t => t.AddedByUser)
+                .OrderByDescending(t => t.CreatedAt)
+                .Select(t => new TreatmentDto
+                {
+                    Id = t.Id,
+                    PatientId = t.PatientId,
+                    Diagnosis = !string.IsNullOrEmpty(t.Diagnosis) ? t.Diagnosis : t.Description,
+                    Treatment = !string.IsNullOrEmpty(t.TreatmentPlan) ? t.TreatmentPlan : t.Description,
+                    Medication = t.Medication ?? string.Empty,
+                    Notes = t.Notes,
+                    UpdatedByUserName = t.AddedByUser != null ? t.AddedByUser.Name : "Staff",
+                    CreatedAt = t.CreatedAt
+                })
+                .ToListAsync();
+
+            var statusHistory = await _db.StatusHistories
+                .Where(s => s.PatientId == id)
+                .Include(s => s.ChangedByUser)
+                .OrderByDescending(s => s.ChangedAt)
+                .Select(s => new StatusHistoryDto
+                {
+                    Id = s.Id,
+                    OldStatus = s.OldStatus,
+                    NewStatus = s.NewStatus,
+                    ChangedByUserName = s.ChangedByUser != null ? s.ChangedByUser.Name : "Staff",
+                    ChangedAt = s.ChangedAt
+                })
+                .ToListAsync();
+
+            return Ok(MapToDto(patient, patient.Owner, patient.Ward, wardOccupancy, treatments, statusHistory));
+        }
+
+        [HttpGet("{id}/status-history")]
+        public async Task<ActionResult<List<StatusHistoryDto>>> GetStatusHistory(int id)
+        {
+            var patientExists = await _db.Patients.AnyAsync(p => p.Id == id);
+            if (!patientExists)
+            {
+                return NotFound(new { message = "Patient not found" });
+            }
+
+            var history = await _db.StatusHistories
+                .Where(s => s.PatientId == id)
+                .Include(s => s.ChangedByUser)
+                .OrderByDescending(s => s.ChangedAt)
+                .Select(s => new StatusHistoryDto
+                {
+                    Id = s.Id,
+                    OldStatus = s.OldStatus,
+                    NewStatus = s.NewStatus,
+                    ChangedByUserName = s.ChangedByUser != null ? s.ChangedByUser.Name : "Staff",
+                    ChangedAt = s.ChangedAt
+                })
+                .ToListAsync();
+
+            return Ok(history);
         }
 
         private static PatientDto MapToDto(

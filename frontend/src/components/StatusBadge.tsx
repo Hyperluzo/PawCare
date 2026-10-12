@@ -35,3 +35,15 @@ export function AdmissionStatusBadge({ status }: { status: string }) {
     </span>
   );
 }
+
+export function StatusBadge({ status }: { status: string }) {
+  const style = CLINICAL_STYLES[status] ?? ADMISSION_STYLES[status] ?? "bg-line text-ink-muted";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${style}`}>
+      {label(status)}
+    </span>
+  );
+}
+
+export { label as formatStatusLabel };
+

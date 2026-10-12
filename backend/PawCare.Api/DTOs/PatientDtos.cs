@@ -72,6 +72,13 @@ namespace PawCare.Api.DTOs
         public DateTime ChangedAt { get; set; }
     }
 
+    public class StatusChangeRequest
+    {
+        public string? NewClinicalStatus { get; set; }
+        public string? NewAdmissionStatus { get; set; }
+        public bool Confirm { get; set; } = false;
+    }
+
     public class PatientDto
     {
         public int Id { get; set; }
