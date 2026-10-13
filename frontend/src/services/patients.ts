@@ -4,6 +4,7 @@ import type {
   Patient,
   PatientSearchResult,
   StatusChangeRequest,
+  StatusHistoryEntry,
   Treatment,
 } from "../types/api";
 

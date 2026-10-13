@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PawCare.Api.Data;
 using PawCare.Api.Models;
+using PawCare.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -39,6 +40,9 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+
+builder.Services.AddScoped<IEmailTemplateService, EmailTemplateService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 
 // --- JWT Authentication setup ---
 var jwtKey = builder.Configuration["Jwt:Key"]!;

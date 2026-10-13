@@ -51,6 +51,41 @@ export interface StatusHistoryEntry {
   changedAt: string;
 }
 
+export type NotificationDeliveryStatus = "PENDING" | "SENT" | "FAILED";
+
+export interface Notification {
+  id: number;
+  patientId: number;
+  patientName: string;
+  ownerId: number;
+  ownerName: string;
+  notificationType: string;
+  recipientEmail: string;
+  deliveryStatus: NotificationDeliveryStatus;
+  errorMessage?: string | null;
+  sentAt?: string | null;
+  createdAt: string;
+}
+
+export interface NotificationDetail extends Notification {
+  subject: string;
+  bodyHtml: string;
+  bodyText: string;
+}
+
+export interface NotificationListResponse {
+  total: number;
+  page: number;
+  pageSize: number;
+  notifications: Notification[];
+}
+
+export interface RetryNotificationResponse {
+  success: boolean;
+  message: string;
+  notification?: Notification | null;
+}
+
 export interface Patient {
   id: number;
   name: string;
@@ -66,6 +101,7 @@ export interface Patient {
   dischargedAt?: string | null;
   treatments: Treatment[];
   statusHistory: StatusHistoryEntry[];
+  notifications?: Notification[];
 }
 
 export interface AdmitPatientRequest {

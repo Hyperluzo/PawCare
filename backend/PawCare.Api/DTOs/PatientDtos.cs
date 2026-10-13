@@ -95,6 +95,7 @@ namespace PawCare.Api.DTOs
         public DateTime? DischargedAt { get; set; }
         public List<TreatmentDto> Treatments { get; set; } = new();
         public List<StatusHistoryDto> StatusHistory { get; set; } = new();
+        public List<NotificationDto> Notifications { get; set; } = new();
     }
 
     public class PatientSearchResultDto

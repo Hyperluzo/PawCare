@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using PawCare.Api.Data;
 using PawCare.Api.DTOs;
 using PawCare.Api.Models;
+using PawCare.Api.Services;
 using System.Security.Claims;
 
 namespace PawCare.Api.Controllers
@@ -14,10 +16,17 @@ namespace PawCare.Api.Controllers
     public class PatientsController : ControllerBase
     {
         private readonly AppDbContext _db;
+        private readonly INotificationService? _notificationService;
+        private readonly ILogger<PatientsController> _logger;
 
-        public PatientsController(AppDbContext db)
+        public PatientsController(
+            AppDbContext db,
+            INotificationService? notificationService = null,
+            ILogger<PatientsController>? logger = null)
         {
             _db = db;
+            _notificationService = notificationService;
+            _logger = logger ?? NullLogger<PatientsController>.Instance;
         }
 
         [HttpGet]
@@ -202,7 +211,26 @@ namespace PawCare.Api.Controllers
                 })
                 .ToListAsync();
 
-            return Ok(MapToDto(patient, patient.Owner, patient.Ward, wardOccupancy, treatments, statusHistory));
+            var notifications = await _db.Notifications
+                .Where(n => n.PatientId == id)
+                .OrderByDescending(n => n.CreatedAt)
+                .Select(n => new NotificationDto
+                {
+                    Id = n.Id,
+                    PatientId = n.PatientId,
+                    PatientName = patient.Name,
+                    OwnerId = n.OwnerId,
+                    OwnerName = patient.Owner.Name,
+                    NotificationType = n.NotificationType,
+                    RecipientEmail = n.RecipientEmail,
+                    DeliveryStatus = n.DeliveryStatus,
+                    ErrorMessage = n.ErrorMessage,
+                    SentAt = n.SentAt,
+                    CreatedAt = n.CreatedAt
+                })
+                .ToListAsync();
+
+            return Ok(MapToDto(patient, patient.Owner, patient.Ward, wardOccupancy, treatments, statusHistory, notifications));
         }
 
         [HttpPost]
@@ -608,6 +636,33 @@ namespace PawCare.Api.Controllers
             _db.StatusHistories.AddRange(historyEntries);
             await _db.SaveChangesAsync();
 
+            // Day 12: Trigger SES status notification email decoupled from status commit
+            string? notificationType = null;
+            if (normalizedAdmission == AdmissionStatuses.Deceased)
+            {
+                notificationType = "DECEASED";
+            }
+            else if (normalizedAdmission == AdmissionStatuses.Discharged)
+            {
+                notificationType = "DISCHARGED";
+            }
+            else if (normalizedClinical != null)
+            {
+                notificationType = normalizedClinical;
+            }
+
+            if (!string.IsNullOrEmpty(notificationType) && _notificationService != null)
+            {
+                try
+                {
+                    await _notificationService.SendStatusEmailAsync(patient, notificationType);
+                }
+                catch (Exception notifEx)
+                {
+                    _logger.LogError(notifEx, "Failed to send status email for patient {PatientId}", patient.Id);
+                }
+            }
+
             var wardOccupancy = await _db.Patients
                 .CountAsync(p => p.WardId == patient.WardId && p.AdmissionStatus == AdmissionStatuses.Admitted);
 
@@ -642,7 +697,26 @@ namespace PawCare.Api.Controllers
                 })
                 .ToListAsync();
 
-            return Ok(MapToDto(patient, patient.Owner, patient.Ward, wardOccupancy, treatments, statusHistory));
+            var notifications = await _db.Notifications
+                .Where(n => n.PatientId == id)
+                .OrderByDescending(n => n.CreatedAt)
+                .Select(n => new NotificationDto
+                {
+                    Id = n.Id,
+                    PatientId = n.PatientId,
+                    PatientName = patient.Name,
+                    OwnerId = n.OwnerId,
+                    OwnerName = patient.Owner.Name,
+                    NotificationType = n.NotificationType,
+                    RecipientEmail = n.RecipientEmail,
+                    DeliveryStatus = n.DeliveryStatus,
+                    ErrorMessage = n.ErrorMessage,
+                    SentAt = n.SentAt,
+                    CreatedAt = n.CreatedAt
+                })
+                .ToListAsync();
+
+            return Ok(MapToDto(patient, patient.Owner, patient.Ward, wardOccupancy, treatments, statusHistory, notifications));
         }
 
         [HttpGet("{id}/status-history")]
@@ -671,13 +745,45 @@ namespace PawCare.Api.Controllers
             return Ok(history);
         }
 
+        [HttpGet("{id}/notifications")]
+        public async Task<ActionResult<List<NotificationDto>>> GetNotifications(int id)
+        {
+            var patient = await _db.Patients.Include(p => p.Owner).FirstOrDefaultAsync(p => p.Id == id);
+            if (patient is null)
+            {
+                return NotFound(new { message = "Patient not found" });
+            }
+
+            var notifications = await _db.Notifications
+                .Where(n => n.PatientId == id)
+                .OrderByDescending(n => n.CreatedAt)
+                .Select(n => new NotificationDto
+                {
+                    Id = n.Id,
+                    PatientId = n.PatientId,
+                    PatientName = patient.Name,
+                    OwnerId = n.OwnerId,
+                    OwnerName = patient.Owner.Name,
+                    NotificationType = n.NotificationType,
+                    RecipientEmail = n.RecipientEmail,
+                    DeliveryStatus = n.DeliveryStatus,
+                    ErrorMessage = n.ErrorMessage,
+                    SentAt = n.SentAt,
+                    CreatedAt = n.CreatedAt
+                })
+                .ToListAsync();
+
+            return Ok(notifications);
+        }
+
         private static PatientDto MapToDto(
             Patient patient,
             Owner owner,
             Ward ward,
             int wardOccupancy,
             List<TreatmentDto>? treatments = null,
-            List<StatusHistoryDto>? statusHistory = null)
+            List<StatusHistoryDto>? statusHistory = null,
+            List<NotificationDto>? notifications = null)
         {
             return new PatientDto
             {
@@ -708,7 +814,8 @@ namespace PawCare.Api.Controllers
                 AdmittedAt = patient.AdmittedAt,
                 DischargedAt = patient.DischargedAt,
                 Treatments = treatments ?? new List<TreatmentDto>(),
-                StatusHistory = statusHistory ?? new List<StatusHistoryDto>()
+                StatusHistory = statusHistory ?? new List<StatusHistoryDto>(),
+                Notifications = notifications ?? new List<NotificationDto>()
             };
         }
     }
