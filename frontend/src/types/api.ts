@@ -126,11 +126,44 @@ export interface StatusChangeRequest {
   confirm?: boolean;
 }
 
+export interface DashboardRecentPatient {
+  id: number;
+  name: string;
+  species: string;
+  breed: string;
+  clinicalStatus: ClinicalStatus;
+  admissionStatus: AdmissionStatus;
+  wardName: string;
+  ownerName: string;
+  admittedAt: string;
+}
+
+export interface DashboardWardSummary {
+  wardId: number;
+  name: string;
+  capacity: number;
+  currentOccupancy: number;
+  availableBeds: number;
+  occupancyPercent: number;
+}
+
 export interface DashboardStats {
   totalPatients: number;
   underTreatment: number;
   treatedToday: number;
   deceasedMtd: number;
+  admittedPatients?: number;
+  dischargedTotal?: number;
+  criticalPatients?: number;
+  stablePatients?: number;
+  recoveringPatients?: number;
+  underObservationPatients?: number;
+  totalWards?: number;
+  totalCapacity?: number;
+  occupiedBeds?: number;
+  occupancyRate?: number;
+  wardSummaries?: DashboardWardSummary[];
+  recentAdmissions?: DashboardRecentPatient[];
 }
 
 export interface PatientSearchResult {
