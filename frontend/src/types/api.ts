@@ -39,6 +39,8 @@ export interface Treatment {
   treatment: string;
   medication: string;
   notes?: string;
+  attachmentUrl?: string | null;
+  attachmentFileName?: string | null;
   updatedByUserName: string;
   createdAt: string;
 }
@@ -86,6 +88,15 @@ export interface RetryNotificationResponse {
   notification?: Notification | null;
 }
 
+export interface FileUploadResponse {
+  fileUrl: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  storageLocation: string;
+  uploadedAt: string;
+}
+
 export interface Patient {
   id: number;
   name: string;
@@ -99,6 +110,8 @@ export interface Patient {
   clinicalStatus: ClinicalStatus;
   admittedAt: string;
   dischargedAt?: string | null;
+  photoUrl?: string | null;
+  documentUrl?: string | null;
   treatments: Treatment[];
   statusHistory: StatusHistoryEntry[];
   notifications?: Notification[];

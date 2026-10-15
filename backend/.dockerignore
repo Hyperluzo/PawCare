@@ -1,0 +1,17 @@
+**/.git
+**/.gitignore
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/*.user
+**/*.suo
+**/*.dbmdl
+**/appsettings.Development.json
+**/appsettings.*.local.json
+**/*.env
+**/*.env.*
+**/docker-compose*.yml
+**/Dockerfile*
+**/node_modules
+**/TestResults

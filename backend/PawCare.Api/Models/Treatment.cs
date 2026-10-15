@@ -29,6 +29,9 @@ namespace PawCare.Api.Models
             set => AddedByUserId = value;
         }
 
+        public string? AttachmentUrl { get; set; }
+        public string? AttachmentFileName { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

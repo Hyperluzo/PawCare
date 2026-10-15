@@ -17,15 +17,29 @@ namespace PawCare.Api.Controllers
     {
         private readonly AppDbContext _db;
         private readonly INotificationService? _notificationService;
+        private readonly IStorageService? _storageService;
+        private readonly IConfiguration? _configuration;
         private readonly ILogger<PatientsController> _logger;
 
         public PatientsController(
             AppDbContext db,
             INotificationService? notificationService = null,
             ILogger<PatientsController>? logger = null)
+            : this(db, notificationService, null, null, logger)
+        {
+        }
+
+        public PatientsController(
+            AppDbContext db,
+            INotificationService? notificationService,
+            IStorageService? storageService,
+            IConfiguration? configuration = null,
+            ILogger<PatientsController>? logger = null)
         {
             _db = db;
             _notificationService = notificationService;
+            _storageService = storageService;
+            _configuration = configuration;
             _logger = logger ?? NullLogger<PatientsController>.Instance;
         }
 
@@ -192,6 +206,8 @@ namespace PawCare.Api.Controllers
                     Treatment = !string.IsNullOrEmpty(t.TreatmentPlan) ? t.TreatmentPlan : t.Description,
                     Medication = t.Medication ?? string.Empty,
                     Notes = t.Notes,
+                    AttachmentUrl = t.AttachmentUrl,
+                    AttachmentFileName = t.AttachmentFileName,
                     UpdatedByUserName = t.AddedByUser != null ? t.AddedByUser.Name : "Staff",
                     CreatedAt = t.CreatedAt
                 })
@@ -331,6 +347,8 @@ namespace PawCare.Api.Controllers
                 AdmissionStatus = "ADMITTED",
                 ClinicalStatus = "UNDER_TREATMENT",
                 AdmittedAt = DateTime.UtcNow,
+                PhotoUrl = string.IsNullOrWhiteSpace(request.PhotoUrl) ? null : request.PhotoUrl.Trim(),
+                DocumentUrl = string.IsNullOrWhiteSpace(request.DocumentUrl) ? null : request.DocumentUrl.Trim(),
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -421,6 +439,16 @@ namespace PawCare.Api.Controllers
                 patient.Ward = newWard;
             }
 
+            if (request.PhotoUrl != null)
+            {
+                patient.PhotoUrl = string.IsNullOrWhiteSpace(request.PhotoUrl) ? null : request.PhotoUrl.Trim();
+            }
+
+            if (request.DocumentUrl != null)
+            {
+                patient.DocumentUrl = string.IsNullOrWhiteSpace(request.DocumentUrl) ? null : request.DocumentUrl.Trim();
+            }
+
             await _db.SaveChangesAsync();
 
             var wardOccupancy = await _db.Patients
@@ -450,6 +478,8 @@ namespace PawCare.Api.Controllers
                     Treatment = !string.IsNullOrEmpty(t.TreatmentPlan) ? t.TreatmentPlan : t.Description,
                     Medication = t.Medication ?? string.Empty,
                     Notes = t.Notes,
+                    AttachmentUrl = t.AttachmentUrl,
+                    AttachmentFileName = t.AttachmentFileName,
                     UpdatedByUserName = t.AddedByUser != null ? t.AddedByUser.Name : "Staff",
                     CreatedAt = t.CreatedAt
                 })
@@ -497,6 +527,8 @@ namespace PawCare.Api.Controllers
                 Medication = request.Medication?.Trim() ?? string.Empty,
                 Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
                 Description = request.Treatment.Trim(),
+                AttachmentUrl = string.IsNullOrWhiteSpace(request.AttachmentUrl) ? null : request.AttachmentUrl.Trim(),
+                AttachmentFileName = string.IsNullOrWhiteSpace(request.AttachmentFileName) ? null : request.AttachmentFileName.Trim(),
                 AddedByUserId = userId,
                 CreatedAt = DateTime.UtcNow
             };
@@ -512,6 +544,8 @@ namespace PawCare.Api.Controllers
                 Treatment = treatment.TreatmentPlan,
                 Medication = treatment.Medication,
                 Notes = treatment.Notes,
+                AttachmentUrl = treatment.AttachmentUrl,
+                AttachmentFileName = treatment.AttachmentFileName,
                 UpdatedByUserName = user.Name,
                 CreatedAt = treatment.CreatedAt
             };
@@ -813,10 +847,145 @@ namespace PawCare.Api.Controllers
                 ClinicalStatus = patient.ClinicalStatus,
                 AdmittedAt = patient.AdmittedAt,
                 DischargedAt = patient.DischargedAt,
+                PhotoUrl = patient.PhotoUrl,
+                DocumentUrl = patient.DocumentUrl,
                 Treatments = treatments ?? new List<TreatmentDto>(),
                 StatusHistory = statusHistory ?? new List<StatusHistoryDto>(),
                 Notifications = notifications ?? new List<NotificationDto>()
             };
+        }
+
+        [HttpPost("{id}/photo")]
+        public async Task<ActionResult<FileUploadResponseDto>> UploadPhoto(int id, IFormFile file)
+        {
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest(new { message = "No file provided or file is empty." });
+            }
+
+            var patient = await _db.Patients.FindAsync(id);
+            if (patient == null)
+            {
+                return NotFound(new { message = "Patient not found" });
+            }
+
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            var allowedPhotoExts = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+            if (!allowedPhotoExts.Contains(extension))
+            {
+                return BadRequest(new { message = $"Invalid image format '{extension}'. Allowed formats: {string.Join(", ", allowedPhotoExts)}" });
+            }
+
+            if (file.Length > 10 * 1024 * 1024)
+            {
+                return BadRequest(new { message = "Photo file size cannot exceed 10MB." });
+            }
+
+            var storage = _storageService ?? new S3StorageService(_configuration ?? new ConfigurationManager(), NullLogger<S3StorageService>.Instance);
+            using var stream = file.OpenReadStream();
+            var fileUrl = await storage.UploadFileAsync(stream, file.FileName, file.ContentType, "patients/photos");
+
+            patient.PhotoUrl = fileUrl;
+            await _db.SaveChangesAsync();
+
+            return Ok(new FileUploadResponseDto
+            {
+                FileUrl = fileUrl,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                SizeBytes = file.Length,
+                StorageLocation = storage.IsSimulationMode ? "AWS S3 (Simulation)" : $"AWS S3 ({storage.BucketName})",
+                UploadedAt = DateTime.UtcNow
+            });
+        }
+
+        [HttpPost("{id}/document")]
+        public async Task<ActionResult<FileUploadResponseDto>> UploadDocument(int id, IFormFile file)
+        {
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest(new { message = "No file provided or file is empty." });
+            }
+
+            var patient = await _db.Patients.FindAsync(id);
+            if (patient == null)
+            {
+                return NotFound(new { message = "Patient not found" });
+            }
+
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            var allowedDocExts = new[] { ".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png", ".webp" };
+            if (!allowedDocExts.Contains(extension))
+            {
+                return BadRequest(new { message = $"Invalid document format '{extension}'. Allowed formats: {string.Join(", ", allowedDocExts)}" });
+            }
+
+            if (file.Length > 25 * 1024 * 1024)
+            {
+                return BadRequest(new { message = "Document file size cannot exceed 25MB." });
+            }
+
+            var storage = _storageService ?? new S3StorageService(_configuration ?? new ConfigurationManager(), NullLogger<S3StorageService>.Instance);
+            using var stream = file.OpenReadStream();
+            var fileUrl = await storage.UploadFileAsync(stream, file.FileName, file.ContentType, "patients/documents");
+
+            patient.DocumentUrl = fileUrl;
+            await _db.SaveChangesAsync();
+
+            return Ok(new FileUploadResponseDto
+            {
+                FileUrl = fileUrl,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                SizeBytes = file.Length,
+                StorageLocation = storage.IsSimulationMode ? "AWS S3 (Simulation)" : $"AWS S3 ({storage.BucketName})",
+                UploadedAt = DateTime.UtcNow
+            });
+        }
+
+        [HttpPost("{id}/treatments/{treatmentId}/attachment")]
+        public async Task<ActionResult<FileUploadResponseDto>> UploadTreatmentAttachment(int id, int treatmentId, IFormFile file)
+        {
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest(new { message = "No file provided or file is empty." });
+            }
+
+            var treatment = await _db.Treatments.FirstOrDefaultAsync(t => t.Id == treatmentId && t.PatientId == id);
+            if (treatment == null)
+            {
+                return NotFound(new { message = "Treatment not found for this patient" });
+            }
+
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            var allowedExts = new[] { ".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png", ".webp", ".txt" };
+            if (!allowedExts.Contains(extension))
+            {
+                return BadRequest(new { message = $"Invalid attachment format '{extension}'." });
+            }
+
+            if (file.Length > 25 * 1024 * 1024)
+            {
+                return BadRequest(new { message = "Attachment file size cannot exceed 25MB." });
+            }
+
+            var storage = _storageService ?? new S3StorageService(_configuration ?? new ConfigurationManager(), NullLogger<S3StorageService>.Instance);
+            using var stream = file.OpenReadStream();
+            var fileUrl = await storage.UploadFileAsync(stream, file.FileName, file.ContentType, "treatments/attachments");
+
+            treatment.AttachmentUrl = fileUrl;
+            treatment.AttachmentFileName = file.FileName;
+            await _db.SaveChangesAsync();
+
+            return Ok(new FileUploadResponseDto
+            {
+                FileUrl = fileUrl,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                SizeBytes = file.Length,
+                StorageLocation = storage.IsSimulationMode ? "AWS S3 (Simulation)" : $"AWS S3 ({storage.BucketName})",
+                UploadedAt = DateTime.UtcNow
+            });
         }
     }
 }

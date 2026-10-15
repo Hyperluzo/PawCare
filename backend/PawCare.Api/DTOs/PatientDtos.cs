@@ -27,6 +27,8 @@ namespace PawCare.Api.DTOs
         public int WardId { get; set; }
         public int? ExistingOwnerId { get; set; }
         public CreateOwnerRequest? NewOwner { get; set; }
+        public string? PhotoUrl { get; set; }
+        public string? DocumentUrl { get; set; }
     }
 
     public class UpdatePatientRequest
@@ -37,6 +39,8 @@ namespace PawCare.Api.DTOs
         public int? Age { get; set; }
         public string? Gender { get; set; }
         public int? WardId { get; set; }
+        public string? PhotoUrl { get; set; }
+        public string? DocumentUrl { get; set; }
     }
 
     public class TreatmentRequest
@@ -45,6 +49,8 @@ namespace PawCare.Api.DTOs
         public string Treatment { get; set; } = default!;
         public string? Medication { get; set; }
         public string? Notes { get; set; }
+        public string? AttachmentUrl { get; set; }
+        public string? AttachmentFileName { get; set; }
     }
 
     public class CreateTreatmentRequest : TreatmentRequest
@@ -60,6 +66,8 @@ namespace PawCare.Api.DTOs
         public string Medication { get; set; } = "";
         public string? Notes { get; set; }
         public string UpdatedByUserName { get; set; } = default!;
+        public string? AttachmentUrl { get; set; }
+        public string? AttachmentFileName { get; set; }
         public DateTime CreatedAt { get; set; }
     }
 
@@ -79,6 +87,16 @@ namespace PawCare.Api.DTOs
         public bool Confirm { get; set; } = false;
     }
 
+    public class FileUploadResponseDto
+    {
+        public string FileUrl { get; set; } = default!;
+        public string FileName { get; set; } = default!;
+        public string ContentType { get; set; } = default!;
+        public long SizeBytes { get; set; }
+        public string StorageLocation { get; set; } = "AWS S3";
+        public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    }
+
     public class PatientDto
     {
         public int Id { get; set; }
@@ -93,6 +111,8 @@ namespace PawCare.Api.DTOs
         public string ClinicalStatus { get; set; } = default!;
         public DateTime AdmittedAt { get; set; }
         public DateTime? DischargedAt { get; set; }
+        public string? PhotoUrl { get; set; }
+        public string? DocumentUrl { get; set; }
         public List<TreatmentDto> Treatments { get; set; } = new();
         public List<StatusHistoryDto> StatusHistory { get; set; } = new();
         public List<NotificationDto> Notifications { get; set; } = new();

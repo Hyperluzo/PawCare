@@ -16,6 +16,8 @@ namespace PawCare.Api.Models
         public string ClinicalStatus { get; set; } = "UNDER_TREATMENT";
         public DateTime AdmittedAt { get; set; } = DateTime.UtcNow;
         public DateTime? DischargedAt { get; set; }
+        public string? PhotoUrl { get; set; }
+        public string? DocumentUrl { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

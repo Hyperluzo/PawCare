@@ -1,0 +1,244 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'PawCare AWS Production Infrastructure: RDS PostgreSQL 16, S3 Attachments Bucket, EC2 Instance with IAM Role, and Scoped Security Groups.'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: 'production'
+    Description: 'Deployment environment identifier (e.g. production, staging)'
+
+  DBMasterUsername:
+    Type: String
+    Default: 'pawcareadmin'
+    Description: 'PostgreSQL RDS master username'
+
+  DBMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: 'PostgreSQL RDS master password'
+
+  DBInstanceClass:
+    Type: String
+    Default: 'db.t4g.micro'
+    AllowedValues:
+      - 'db.t4g.micro'
+      - 'db.t3.micro'
+      - 'db.t3.small'
+      - 'db.t4g.small'
+    Description: 'RDS instance class (db.t4g.micro / db.t3.micro are Free Tier eligible)'
+
+  EC2InstanceType:
+    Type: String
+    Default: 't3.small'
+    AllowedValues:
+      - 't3.micro'
+      - 't3.small'
+      - 't4g.small'
+      - 't3.medium'
+    Description: 'EC2 instance type for PawCare application host'
+
+  AdminIpCidr:
+    Type: String
+    Default: '0.0.0.0/0'
+    Description: 'CIDR block allowed to SSH into the EC2 instance'
+
+Resources:
+  # --- S3 Bucket for Patient Photos & Medical Attachments ---
+  PawCareStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'pawcare-attachments-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+            MaxAge: 3600
+
+  # --- Security Groups ---
+  # EC2 Web Security Group
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Allow HTTP, HTTPS, and SSH to PawCare App'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AdminIpCidr
+      Tags:
+        - Key: Name
+          Value: !Sub 'pawcare-${EnvironmentName}-ec2-sg'
+
+  # RDS Database Security Group - LOCKED INBOUND ONLY TO EC2
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'PostgreSQL RDS Security Group - strictly allows ingress from EC2 SG only'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+          Description: 'Allow PostgreSQL connections ONLY from the PawCare EC2 App security group'
+      Tags:
+        - Key: Name
+          Value: !Sub 'pawcare-${EnvironmentName}-rds-sg'
+
+  # --- RDS PostgreSQL Database Instance ---
+  PawCareDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: 'pawcare'
+      Engine: 'postgres'
+      EngineVersion: '16.3'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: '20'
+      StorageType: 'gp3'
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'Sun:04:30-Sun:05:30'
+      PubliclyAccessible: false
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub 'pawcare-${EnvironmentName}-postgres-rds'
+
+  # --- IAM Role & Policy for EC2 (S3 + SES Access) ---
+  EC2AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'PawCareEC2AppRole-${EnvironmentName}-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Policies:
+        - PolicyName: PawCareS3AttachmentAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                  - 's3:DeleteObject'
+                  - 's3:PutObjectAcl'
+                  - 's3:ListBucket'
+                Resource:
+                  - !GetAtt PawCareStorageBucket.Arn
+                  - !Sub '${PawCareStorageBucket.Arn}/*'
+        - PolicyName: PawCareSESEmailAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ses:SendEmail'
+                  - 'ses:SendRawEmail'
+                  - 'ses:GetSendQuota'
+                Resource: '*'
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub 'PawCareEC2InstanceProfile-${EnvironmentName}-${AWS::Region}'
+      Roles:
+        - !Ref EC2AppRole
+
+  # --- EC2 Application Instance ---
+  PawCareEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref EC2InstanceType
+      ImageId: 'resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      SecurityGroupIds:
+        - !GetAtt EC2SecurityGroup.GroupId
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+          dnf update -y
+          dnf install -y docker git postgresql16
+          systemctl start docker
+          systemctl enable docker
+          usermod -a -G docker ec2-user
+
+          mkdir -p /opt/pawcare
+          cd /opt/pawcare
+
+          cat << 'EOF' > /opt/pawcare/.env
+          ASPNETCORE_ENVIRONMENT=Production
+          ConnectionStrings__Default=Host=${PawCareDatabase.Endpoint.Address};Port=${PawCareDatabase.Endpoint.Port};Database=pawcare;Username=${DBMasterUsername};Password=${DBMasterPassword};SslMode=Require;
+          ApplyMigrationsOnStartup=true
+          Aws__Region=${AWS::Region}
+          Aws__S3__BucketName=${PawCareStorageBucket}
+          Aws__S3__SimulationMode=false
+          Aws__SimulationMode=false
+          EnableSwagger=true
+          EOF
+
+          echo "PawCare EC2 initialization complete."
+      Tags:
+        - Key: Name
+          Value: !Sub 'pawcare-${EnvironmentName}-app-host'
+
+Outputs:
+  S3BucketName:
+    Description: 'AWS S3 Bucket created for patient images & reports'
+    Value: !Ref PawCareStorageBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-S3Bucket'
+
+  RDSEndpoint:
+    Description: 'PostgreSQL RDS Endpoint Address'
+    Value: !GetAtt PawCareDatabase.Endpoint.Address
+
+  RDSPort:
+    Description: 'PostgreSQL RDS Port'
+    Value: !GetAtt PawCareDatabase.Endpoint.Port
+
+  EC2PublicIP:
+    Description: 'Public IP address of the PawCare Application EC2 instance'
+    Value: !GetAtt PawCareEC2Instance.PublicIp
+
+  EC2PublicDNS:
+    Description: 'Public DNS Name of the PawCare Application EC2 instance'
+    Value: !GetAtt PawCareEC2Instance.PublicDnsName

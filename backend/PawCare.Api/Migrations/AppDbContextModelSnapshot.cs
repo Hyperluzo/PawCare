@@ -126,6 +126,9 @@ namespace PawCare.Api.Migrations
                     b.Property<DateTime?>("DischargedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DocumentUrl")
+                        .HasColumnType("text");
+
                     b.Property<string>("Gender")
                         .IsRequired()
                         .HasColumnType("text");
@@ -136,6 +139,9 @@ namespace PawCare.Api.Migrations
 
                     b.Property<int>("OwnerId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("PhotoUrl")
+                        .HasColumnType("text");
 
                     b.Property<string>("Species")
                         .IsRequired()
@@ -203,6 +209,12 @@ namespace PawCare.Api.Migrations
 
                     b.Property<int>("AddedByUserId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("AttachmentFileName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("AttachmentUrl")
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");

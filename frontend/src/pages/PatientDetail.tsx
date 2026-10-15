@@ -6,15 +6,19 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock,
+  Cloud,
+  ExternalLink,
   Eye,
   FileText,
   History,
   Mail,
+  Paperclip,
   Pill,
   Plus,
   RefreshCw,
   Send,
   Stethoscope,
+  Upload,
   User,
   X,
 } from "lucide-react";
@@ -56,6 +60,11 @@ export default function PatientDetail() {
   const [treatment, setTreatment] = useState({ diagnosis: "", treatment: "", medication: "", notes: "" });
   const [savingTreatment, setSavingTreatment] = useState(false);
   const [treatmentSuccess, setTreatmentSuccess] = useState<string | null>(null);
+  const [treatmentFile, setTreatmentFile] = useState<File | null>(null);
+
+  // S3 upload states
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
 
   const [newStatus, setNewStatus] = useState<ClinicalStatus>("UNDER_TREATMENT");
   const [markDischarged, setMarkDischarged] = useState(false);
@@ -94,14 +103,56 @@ export default function PatientDetail() {
     setTreatmentSuccess(null);
     setStatusSuccess(null);
     try {
-      await patientsApi.addTreatment(patientId, treatment);
+      const createdTreatment = await patientsApi.addTreatment(patientId, treatment);
+      if (treatmentFile) {
+        await patientsApi.uploadTreatmentAttachment(patientId, createdTreatment.id, treatmentFile);
+        setTreatmentFile(null);
+      }
       setTreatment({ diagnosis: "", treatment: "", medication: "", notes: "" });
-      setTreatmentSuccess("Treatment recorded successfully and attributed to your staff account.");
+      setTreatmentSuccess(
+        treatmentFile
+          ? "Treatment record and report attachment uploaded to AWS S3 successfully."
+          : "Treatment recorded successfully and attributed to your staff account."
+      );
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't save treatment record.");
     } finally {
       setSavingTreatment(false);
+    }
+  }
+
+  async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    setError(null);
+    try {
+      const res = await patientsApi.uploadPhoto(patientId, file);
+      setTreatmentSuccess(`Patient photo uploaded to ${res.storageLocation} successfully.`);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to upload photo to S3.");
+    } finally {
+      setUploadingPhoto(false);
+      e.target.value = "";
+    }
+  }
+
+  async function handleDocumentUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingDoc(true);
+    setError(null);
+    try {
+      const res = await patientsApi.uploadDocument(patientId, file);
+      setTreatmentSuccess(`Medical document uploaded to ${res.storageLocation} successfully.`);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to upload document to S3.");
+    } finally {
+      setUploadingDoc(false);
+      e.target.value = "";
     }
   }
 
@@ -214,11 +265,44 @@ export default function PatientDetail() {
           <ArrowLeft className="w-3.5 h-3.5" /> Back to Patients
         </Link>
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-          <div>
-            <h1 className="font-display font-semibold text-2xl text-ink tracking-tight">{patient.name}</h1>
-            <p className="text-sm text-ink-muted mt-0.5">
-              {patient.species} &bull; {patient.breed} &bull; {patient.age} yrs &bull; {patient.gender}
-            </p>
+          <div className="flex items-center gap-4">
+            <div className="relative group shrink-0">
+              {patient.photoUrl ? (
+                <img
+                  src={patient.photoUrl}
+                  alt={patient.name}
+                  className="w-16 h-16 rounded-2xl object-cover border-2 border-teal-500/30 shadow-xs"
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-2xl bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-700 font-display font-bold text-xl">
+                  {patient.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <label
+                className="absolute -bottom-1 -right-1 p-1.5 bg-surface border border-line rounded-lg shadow-xs cursor-pointer hover:bg-bg transition-colors"
+                title="Upload Photo to AWS S3"
+              >
+                <Upload className="w-3.5 h-3.5 text-teal-700" />
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                  disabled={uploadingPhoto}
+                />
+              </label>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="font-display font-semibold text-2xl text-ink tracking-tight">{patient.name}</h1>
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  <Cloud className="w-3 h-3 text-emerald-600" /> AWS S3
+                </span>
+              </div>
+              <p className="text-sm text-ink-muted mt-0.5">
+                {patient.species} &bull; {patient.breed} &bull; {patient.age} yrs &bull; {patient.gender}
+              </p>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <AdmissionStatusBadge status={patient.admissionStatus} />
@@ -267,7 +351,7 @@ export default function PatientDetail() {
       )}
 
       {/* Primary Details Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         {/* Ward Info */}
         <div className="bg-surface border border-line rounded-2xl p-5 shadow-xs">
           <h2 className="font-display font-semibold text-ink text-sm mb-3">Ward Assignment</h2>
@@ -321,6 +405,63 @@ export default function PatientDetail() {
                 <span className="font-medium text-ink truncate max-w-[160px]">{patient.owner.address}</span>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* AWS S3 Medical Files */}
+        <div className="bg-surface border border-line rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display font-semibold text-ink text-sm">Medical Files (S3)</h2>
+              <span className="text-[11px] font-medium text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full inline-flex items-center gap-1 border border-emerald-200">
+                <Cloud className="w-2.5 h-2.5 text-emerald-600" /> AWS S3
+              </span>
+            </div>
+            <div className="space-y-3 text-sm">
+              <div>
+                <span className="text-xs text-ink-muted block mb-1">Patient Photo</span>
+                {patient.photoUrl ? (
+                  <a
+                    href={patient.photoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-teal-700 hover:text-teal-900 font-medium"
+                  >
+                    <ExternalLink className="w-3 h-3" /> View S3 Photo
+                  </a>
+                ) : (
+                  <span className="text-xs text-ink-muted italic">No photo uploaded</span>
+                )}
+              </div>
+              <div>
+                <span className="text-xs text-ink-muted block mb-1">Medical Record / PDF</span>
+                {patient.documentUrl ? (
+                  <a
+                    href={patient.documentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-teal-700 hover:text-teal-900 font-medium bg-teal-50 px-2 py-1 rounded-md border border-teal-200/60"
+                  >
+                    <FileText className="w-3 h-3" /> View S3 Document
+                  </a>
+                ) : (
+                  <span className="text-xs text-ink-muted italic">No report attached</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="pt-3 border-t border-line/60 mt-3">
+            <label className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-surface hover:bg-bg px-3 py-1.5 text-xs font-medium text-ink cursor-pointer transition-colors shadow-xs">
+              <Upload className="w-3.5 h-3.5 text-teal-700" />
+              <span>{uploadingDoc ? "Uploading..." : "Upload Document"}</span>
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,image/*"
+                className="hidden"
+                onChange={handleDocumentUpload}
+                disabled={uploadingDoc}
+              />
+            </label>
           </div>
         </div>
 
@@ -447,6 +588,29 @@ export default function PatientDetail() {
                 onChange={(e) => setTreatment({ ...treatment, notes: e.target.value })}
               />
             </div>
+            <div>
+              <label className={labelClass}>Attach Report / Prescription Scan (AWS S3)</label>
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 border border-line rounded-lg text-xs font-medium text-ink bg-surface hover:bg-bg transition-colors shadow-xs">
+                  <Paperclip className="w-3.5 h-3.5 text-teal-700" />
+                  <span>{treatmentFile ? treatmentFile.name : "Attach PDF / Image report"}</span>
+                  <input
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => setTreatmentFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {treatmentFile && (
+                  <button
+                    type="button"
+                    onClick={() => setTreatmentFile(null)}
+                    className="text-xs text-red-600 hover:underline"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
             <button
               type="submit"
               disabled={savingTreatment}
@@ -512,6 +676,21 @@ export default function PatientDetail() {
                   {t.notes && (
                     <div className="text-xs text-ink-muted bg-bg/80 border border-line/60 rounded-lg p-2 italic">
                       {t.notes}
+                    </div>
+                  )}
+
+                  {t.attachmentUrl && (
+                    <div className="pt-0.5">
+                      <a
+                        href={t.attachmentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs text-teal-800 bg-teal-50 border border-teal-200/80 px-2.5 py-1 rounded-md hover:bg-teal-100 transition-colors"
+                      >
+                        <Paperclip className="w-3 h-3 text-teal-600" />
+                        <span className="font-medium">{t.attachmentFileName ?? "Medical Attachment"}</span>
+                        <ExternalLink className="w-3 h-3 text-teal-500" />
+                      </a>
                     </div>
                   )}
 

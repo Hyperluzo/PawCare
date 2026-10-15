@@ -30,12 +30,24 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? new[] { "http://localhost:3000", "http://localhost:5173" };
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
-        policy.WithOrigins("http://localhost:3000", "http://localhost:5173")
-              .AllowAnyHeader()
-              .AllowAnyMethod());
+    {
+        if (allowedOrigins.Contains("*"))
+        {
+            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+        }
+        else
+        {
+            policy.WithOrigins(allowedOrigins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+    });
 });
 
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -43,11 +55,12 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddScoped<IEmailTemplateService, EmailTemplateService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IStorageService, S3StorageService>();
 
 // --- JWT Authentication setup ---
-var jwtKey = builder.Configuration["Jwt:Key"]!;
-var jwtIssuer = builder.Configuration["Jwt:Issuer"];
-var jwtAudience = builder.Configuration["Jwt:Audience"];
+var jwtKey = builder.Configuration["Jwt:Key"] ?? "pawcare-default-token-signing-key-for-local-development";
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "pawcare-api";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "pawcare-clients";
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -69,25 +82,37 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("EnableSwagger", false))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+}
 
-    using var scope = app.Services.CreateScope();
+using (var scope = app.Services.CreateScope())
+{
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    if (!db.Users.Any())
+    if (builder.Configuration.GetValue<bool>("ApplyMigrationsOnStartup", false) || args.Contains("--migrate"))
     {
-        db.Users.Add(new User {
-            Name = "Admin", Email = "admin@pawcare.local",
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword("ChangeMe123!"),
-            AccountType = "ADMIN"
-        });
-        db.Wards.AddRange(
-            new Ward { Name = "General Ward", Description = "General care", Capacity = 20 },
-            new Ward { Name = "ICU", Description = "Critical care", Capacity = 6 }
-        );
-        db.SaveChanges();
+        app.Logger.LogInformation("Applying pending database migrations...");
+        db.Database.Migrate();
+        app.Logger.LogInformation("Database migrations applied successfully.");
+    }
+
+    if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("SeedDefaultData", false))
+    {
+        if (!db.Users.Any())
+        {
+            db.Users.Add(new User {
+                Name = "Admin", Email = "admin@pawcare.local",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("ChangeMe123!"),
+                AccountType = "ADMIN"
+            });
+            db.Wards.AddRange(
+                new Ward { Name = "General Ward", Description = "General care", Capacity = 20 },
+                new Ward { Name = "ICU", Description = "Critical care", Capacity = 6 }
+            );
+            db.SaveChanges();
+        }
     }
 }
 

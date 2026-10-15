@@ -1,0 +1,85 @@
+services:
+  pawcare-db:
+    image: postgres:16-alpine
+    container_name: pawcare-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pawcare}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pawcare"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pawcare-net
+
+  pawcare-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pawcare-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ConnectionStrings__Default: ${ConnectionStrings__Default}
+      Jwt__Key: ${Jwt__Key}
+      Jwt__Issuer: ${Jwt__Issuer:-pawcare-api}
+      Jwt__Audience: ${Jwt__Audience:-pawcare-clients}
+      ApplyMigrationsOnStartup: "true"
+      SeedDefaultData: "true"
+      EnableSwagger: "true"
+      Cors__AllowedOrigins__0: "*"
+      Aws__Region: ${Aws__Region:-us-east-1}
+      Aws__SenderEmail: ${Aws__SenderEmail:-no-reply@pawcare.local}
+      Aws__SimulationMode: ${Aws__SimulationMode:-true}
+      Aws__S3__BucketName: ${Aws__S3__BucketName:-pawcare-attachments-production}
+      Aws__S3__SimulationMode: ${Aws__S3__SimulationMode:-true}
+    depends_on:
+      pawcare-db:
+        condition: service_healthy
+    networks:
+      - pawcare-net
+
+  pawcare-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: "/api"
+    container_name: pawcare-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - pawcare-api
+    networks:
+      - pawcare-net
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: pawcare-localstack
+    profiles:
+      - aws-mock
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,ses
+      DEFAULT_REGION: us-east-1
+    networks:
+      - pawcare-net
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  pawcare-net:
+    driver: bridge

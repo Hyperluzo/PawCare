@@ -38,8 +38,23 @@ export const patientsApi = {
   update: (id: number, data: Partial<Patient>) => api.put<Patient>(`/patients/${id}`, data),
   addTreatment: (
     id: number,
-    data: { diagnosis: string; treatment: string; medication: string; notes?: string }
+    data: { diagnosis: string; treatment: string; medication: string; notes?: string; attachmentUrl?: string; attachmentFileName?: string }
   ) => api.post<Treatment>(`/patients/${id}/treatments`, data),
+  uploadPhoto: (id: number, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return api.postFormData<FileUploadResponse>(`/patients/${id}/photo`, formData);
+  },
+  uploadDocument: (id: number, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return api.postFormData<FileUploadResponse>(`/patients/${id}/document`, formData);
+  },
+  uploadTreatmentAttachment: (id: number, treatmentId: number, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return api.postFormData<FileUploadResponse>(`/patients/${id}/treatments/${treatmentId}/attachment`, formData);
+  },
   changeStatus: (id: number, data: StatusChangeRequest) =>
     api.patch<Patient>(`/patients/${id}/status`, data),
   getStatusHistory: (id: number) =>
